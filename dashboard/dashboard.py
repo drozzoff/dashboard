@@ -10,8 +10,8 @@ from numpy.typing import NDArray
 from functools import wraps
 from pathlib import Path
 
-from toolbox.dashboard.callbacks import register_callbacks
-from toolbox.dashboard.layout import make_layout
+from dashboard.callbacks import register_callbacks
+from dashboard.layout import make_layout
 
 
 def flatten_input(method):

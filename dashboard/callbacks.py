@@ -8,7 +8,7 @@ import numpy as np
 import numbers
 import datetime
 from string import Formatter
-from toolbox.dashboard.models import Ratio
+from dashboard.models import Ratio
 
 
 def _bin_array(arr, bin_length: int, how: str) -> list:
