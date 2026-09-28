@@ -11,7 +11,7 @@ DEPENDENCIES = [
 
 setup(
 	name = "profile-dashboard",
-	version = "0.0.1",
+	version = "0.0.2",
 	description = "Dashboard to visualize live or file-based data",
 	author = "Andrii Pastushenko",
 	url = "https://github.com/drozzoff/dashboard",
