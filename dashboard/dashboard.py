@@ -9,10 +9,18 @@ import numpy as np
 from numpy.typing import NDArray
 from functools import wraps
 from pathlib import Path
+import logging
 
 from dashboard.callbacks import register_callbacks
 from dashboard.layout import make_layout
 
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+	level = logging.INFO,
+	format = "%(asctime)s | %(levelname)-8s | %(message)s",
+	datefmt = "%Y-%m-%d %H:%M:%S",
+	)
 
 def flatten_input(method):
 	@wraps(method)
@@ -79,30 +87,31 @@ class DataBuffer:
 
 class Dashboard:
 	"""
-	Class to manage the tracking dashboard.
+	A simple dashboard that runs on `Dash`.
 	"""
 
 	CHUNK_SIZE = 1000 # max number points to send
 	MAX_CALLBACK_LEVEL = 3
 	
 	def __init__(
-			self,
-			profile,
-			host: str = '127.0.0.1',
-			port: int = 0,
-			data_to_monitor: list[str] | str | None = None,
+		self,
+		profile,
+		data_to_monitor: list[str] | str | None = None,
+		*,
+		data_host: str = '127.0.0.1',
+		data_port: int = 35236,
 		):
 		self.profile = profile
 
 		self.assets_dir = Path(__file__).resolve().parent / "assets"
 
-		if host is None:
+		if data_host is None:
 			raise ValueError("Host cannot be `None`.")
 		
 		if data_to_monitor is None:
 			raise ValueError("No data to monitor provided")
 		
-		self.host, self.port = host, port
+		self.data_host, self.data_port = data_host, data_port
 		self.data_to_monitor = data_to_monitor
 
 		self._buflock = threading.Lock()
@@ -112,13 +121,13 @@ class Dashboard:
 
 		self._set_dependencies()
 
-	def _set_dependencies(self):
+	def _set_dependencies(self, debug = False):
 
 		self.data_fields = self.profile.make_datafields(self)
 		self.info_fields = self.profile.make_infofields(self)
 
 		self.callbacks, buffer_keys = [], []
-		print(self.data_to_monitor)
+		logger.info(f"Requested the data {self.data_to_monitor}")
 
 		self.info_dict = {}
 
@@ -156,7 +165,7 @@ class Dashboard:
 				tmp_dct = {x: None for x in self.info_fields[data_key].output_info}
 				self.info_dict = self.info_dict | tmp_dct
 		
-		print(self.info_dict)
+#		print(self.info_dict)
 
 		self.callbacks.sort(key = lambda c: c['level'])
 
@@ -169,10 +178,11 @@ class Dashboard:
 		buffers_to_create = buffer_keys.copy()
 
 		buffer_keys_masked = list(filter(lambda key: key in fields_keys, buffer_keys))
-		print(f"Pass 0: {buffer_keys}")
-		print(f"\t not unique values = {buffer_keys_masked}")
+		if debug: 
+			logger.info(f"Pass 0: {buffer_keys}")
+			logger.info(f"not unique values = {buffer_keys_masked}")
 
-		index = 1
+		pass_index = 1
 		while buffer_keys_masked:
 			for key in buffer_keys_masked:
 				buffer_keys.remove(key)
@@ -181,19 +191,21 @@ class Dashboard:
 
 			buffer_keys = list(set(buffer_keys))
 
-			print(f"Pass {index}: {buffer_keys}")
-			index += 1
+			if debug: logger.info(f"Pass {pass_index}: {buffer_keys}")
+			
+			pass_index += 1
 			buffer_keys_masked = list(filter(lambda key: key in fields_keys, buffer_keys))
-			print(f"\t not unique values = {buffer_keys_masked}")
+			if debug: logger.info(f"not unique values = {buffer_keys_masked}")
 
-			if index == 10:
-				raise Exception("Could not resolve dependencies.")
+			if pass_index == 10:
+				logger.error(f"Could not resolve dependencies. pass_index == 10")
+				raise Exception()
 		
 		self.data_to_expect = buffer_keys
 		buffers_to_create = list(set(buffers_to_create))
 
-		print(f"Data to expect = {self.data_to_expect}")
-		print(f"buffers to create = {buffers_to_create}")
+		logger.info(f"Expected data: {self.data_to_expect}")
+		logger.info(f"Buffers to create: {buffers_to_create}")
 		
 		self.data_buffer = {key: DataBuffer() for key in buffers_to_create}
 
@@ -211,17 +223,20 @@ class Dashboard:
 	def _buffers_filled_properly(self, batch_id: int):
 		return all([self.data_buffer[key].last_batch_id == batch_id for key in self.data_to_expect])
 
-	def run_callbacks(self):
+	def run_callbacks(self, debug = False):
 		if not self._buffers_filled_properly(self.current_batch_id):
 			raise ValueError(f"There is missing data for the batch {self.current_batch_id}")
 		
 		for i in range(self.MAX_CALLBACK_LEVEL):
 			for callback in self.callbacks:
 				if callback['level'] == i:
-#					print(f"Running {callback['name']}")
+					if debug: logger.info(f"Running callback '{callback['name']}'")
 					callback['callback']()
 
 	def start_listener(self):
+		"""
+		Starts listener at "data_host:data_port".
+		"""
 		srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self._listener_socket = srv
@@ -230,16 +245,16 @@ class Dashboard:
 		except AttributeError:
 			pass
 
-		srv.bind((self.host, self.port))
+		srv.bind((self.data_host, self.data_port))
 		srv.listen(1)
 
 		assigned_port = srv.getsockname()[1]
-		print(f"[INFO] Started listener on port {assigned_port}")
+		logger.info(f"Listening for data at {self.data_host}:{self.data_port}")
 		
 		def run():
 			while not getattr(self, "_stop_listener", False):
 				conn, addr = srv.accept()
-				print(f"[INFO] Connection from {addr}")
+				logger.info(f"Connection from {addr}")
 				self._clear_buffer()
 				self.current_batch_id = 0
 
@@ -265,10 +280,10 @@ class Dashboard:
 						self.current_batch_id += 1
 
 				except json.JSONDecodeError as e:
-					print("[ERROR] Invalid JSON", e)
+					logger.error(f"Invalid JSON: {e}")
 				finally:
 					conn.close()
-					print("[INFO] Client disconnected, back to listening")
+					logger.info("Client disconnected, back to listening")
 		
 		self._listener_thread = threading.Thread(target = run, daemon = True)
 		self._listener_thread.start()
@@ -309,10 +324,7 @@ class Dashboard:
 				continue
 
 			if len(x) != len(y):
-				print(
-					f"[ERROR] length mismatch for {key!r}, trace {i}:"
-					f"x = {len(x)}, y = {len(y)}"
-				)
+				logger.error(f"length mismatch for {key!r}, trace {i}: x = {len(x)}, y = {len(y)}")
 				return
 
 			fig.add_trace(go.Scatter(
@@ -325,7 +337,12 @@ class Dashboard:
 
 		return fig
 
-	def run_dash_server(self):
+	def run_dash_server(
+		self,
+		*,
+		host: str = "127.0.0.1",
+		port: int = 8050
+		):
 		"""
 		Start a dash server
 		"""
@@ -339,10 +356,15 @@ class Dashboard:
 		register_callbacks(self.app, self)
 
 		try:
-			print("[INFO] Starting Dash server...")
-			self.app.run(debug = True, use_reloader = False)
+			logger.info(f"Starting Dash server at {host}:{port}")
+			self.app.run(
+				host = host,
+				port = port,
+				debug = True, 
+				use_reloader = False
+			)
 		except KeyboardInterrupt:
-			print("\n[INFO] Caught Ctrl+C. Cleaning up...")
+			logger.info("Caught Ctrl+C. Cleaning up...")
 			sys.exit(0)
 
 if __name__ == "__main__":
@@ -350,7 +372,6 @@ if __name__ == "__main__":
 
 	test = Dashboard(
 		profile = SIS18extraction(),
-		port = 35235, 
 		data_to_monitor = ["intensity"]
 	)
 	test.run_dash_server()
