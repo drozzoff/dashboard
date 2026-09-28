@@ -16,11 +16,26 @@ from dashboard.layout import make_layout
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-	level = logging.INFO,
-	format = "%(asctime)s | %(levelname)-8s | %(message)s",
-	datefmt = "%Y-%m-%d %H:%M:%S",
+
+def _configure_default_logging(level=logging.INFO):
+	package_logger = logging.getLogger("dashboard")
+
+	# Respect configuration supplied by the user.
+	if package_logger.handlers:
+		return
+
+	handler = logging.StreamHandler()
+	handler.setFormatter(
+		logging.Formatter(
+			"%(asctime)s | %(levelname)-8s | %(message)s",
+			datefmt="%Y-%m-%d %H:%M:%S",
+		)
 	)
+
+	package_logger.addHandler(handler)
+	package_logger.setLevel(level)
+	package_logger.propagate = False
+
 
 def flatten_input(method):
 	@wraps(method)
@@ -100,15 +115,17 @@ class Dashboard:
 		*,
 		data_host: str = '127.0.0.1',
 		data_port: int = 35236,
+		log_level: int | str | None = logging.INFO
 		):
+
+		if log_level is not None:
+			_configure_default_logging(log_level)
 		self.profile = profile
 
 		self.assets_dir = Path(__file__).resolve().parent / "assets"
-
-		if data_host is None:
-			raise ValueError("Host cannot be `None`.")
 		
 		if data_to_monitor is None:
+			logger.error("No data to monitor provided")
 			raise ValueError("No data to monitor provided")
 		
 		self.data_host, self.data_port = data_host, data_port
@@ -356,12 +373,13 @@ class Dashboard:
 		register_callbacks(self.app, self)
 
 		try:
-			logger.info(f"Starting Dash server at {host}:{port}")
+			logger.info(f"Starting Dash server at http://{host}:{port}")
 			self.app.run(
 				host = host,
 				port = port,
-				debug = True, 
-				use_reloader = False
+				debug = False, 
+				use_reloader = False,
+				dev_tools_silence_routes_logging = True,
 			)
 		except KeyboardInterrupt:
 			logger.info("Caught Ctrl+C. Cleaning up...")
