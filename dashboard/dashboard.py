@@ -263,7 +263,7 @@ class Dashboard:
 	def _buffers_filled_properly(self, batch_id: int):
 		return all([self.data_buffer[key].last_batch_id == batch_id for key in self.data_to_expect])
 
-	def run_callbacks(self, debug = False):
+	def run_callbacks(self):
 		if not self._buffers_filled_properly(self.current_batch_id):
 			raise ValueError(f"There is missing data for the batch {self.current_batch_id}")
 		
@@ -297,7 +297,13 @@ class Dashboard:
 		
 		def run():
 			while not getattr(self, "_stop_listener", False):
-				conn, addr = srv.accept()
+				try:
+					conn, addr = srv.accept()
+				except OSError:
+					# fail safe for the case `stop_listener()` is slower
+					if self._stop_listener: break
+					raise
+
 				logger.info("Connection from %s", addr)
 				self._clear_buffer()
 				self.current_batch_id = 0
@@ -312,7 +318,11 @@ class Dashboard:
 						while '\n' in buffer:
 							line, buffer = buffer.split('\n', 1)
 
-							incoming = json.loads(line)
+							try:
+								incoming = json.loads(line)
+							except json.JSONDecodeError as e:
+								logger.warning("Skipping invalid JSON data: %s", e)
+								continue
 
 							with self._buflock:
 								for key in self.data_to_expect:
@@ -324,10 +334,7 @@ class Dashboard:
 								
 								self.run_callbacks()
 						
-						self.current_batch_id += 1
-
-				except json.JSONDecodeError as e:
-					logger.warning("Skipping invalid JSON data: %s", e)
+							self.current_batch_id += 1	
 				finally:
 					conn.close()
 					logger.info("Client disconnected, back to listening")

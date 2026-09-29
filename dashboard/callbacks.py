@@ -100,21 +100,35 @@ def register_callbacks(app: Dash, dashboard: Dashboard):
 		return stop_update
 
 	@app.callback(
-		Input("bin-length", "value")
+		Output(
+			{"type":"stream-graph", "key": MATCH}, 
+			"figure",
+			allow_duplicate = True
+		),
+		Input("bin-length", "value"),
+		State("mode-switch", "value"),
+		State({"type":"stream-graph", "key": MATCH}, "id"),
+		prevent_initial_call = True
 	)
-	def reset_pointers(bin_length):
+	def flush_figure_points(bin_length, mode, graph_id):
 		"""
-		Resets the pointers for the data fields upon changing the the bin length.
+		Flushes the data from the figures that already contain some data.
 
 		Parameters
 		----------
 		bin_length
 			Bin length. <= Trigger
 		"""
+		data_key = graph_id["key"]
+
+		if not is_live(mode):
+			return no_update
+
 		with dashboard._buflock:
-			for data_key in dashboard.data_fields:
-				dashboard.data_fields[data_key].buffer_pointer = 0
-				dashboard.data_fields[data_key].buffer_pointer_bin = 0
+			dashboard.data_fields[data_key].buffer_pointer = 0
+			dashboard.data_fields[data_key].buffer_pointer_bin = 0
+
+		return dashboard.plot_figure(data_key)
 
 	@app.callback(
 		Output({"type": "info-md", "key": MATCH}, "children"),
@@ -160,6 +174,7 @@ def register_callbacks(app: Dash, dashboard: Dashboard):
 
 		if is_live(mode):
 			if not getattr(dashboard, "_listener_thread", None):
+				dashboard._stop_listener = False
 				dashboard.start_listener()
 		else:
 			if getattr(dashboard, "_listener_thread", None):
