@@ -2,7 +2,7 @@ from __future__ import annotations
 from dash import Input, Output, State, MATCH, no_update, Dash
 from dash.exceptions import PreventUpdate
 import os
-import traceback
+import logging
 from pathlib import Path
 import numpy as np
 import numbers
@@ -10,6 +10,8 @@ import datetime
 from string import Formatter
 from dashboard.models import Ratio
 
+
+logger = logging.getLogger(__name__)
 
 def _bin_array(arr, bin_length: int, how: str) -> list:
 	if not arr: return []
@@ -162,7 +164,7 @@ def register_callbacks(app: Dash, dashboard: Dashboard):
 		else:
 			if getattr(dashboard, "_listener_thread", None):
 				dashboard.stop_listener()
-				print(f"[INFO] Listener terminated.")
+				logger.info("Listener terminated")
 
 				del dashboard._listener_thread
 		return ""
@@ -370,7 +372,6 @@ def register_callbacks(app: Dash, dashboard: Dashboard):
 		if not is_file(mode):
 			return no_update
 		
-		print("Rendering the whole figure")
 		data_key = graph_id["key"]
 		df = dashboard.data_fields[data_key]
 		bin_info = df.bin
@@ -513,11 +514,16 @@ def register_callbacks(app: Dash, dashboard: Dashboard):
 				
 				dashboard.run_callbacks()
 
-			print(f"[INFO] Loaded {loaded_file.selection_name.lower()} selection {selection_id}")
-
+			logger.info(
+				"Loaded %s selection %s",
+				loaded_file.selection_name.lower(),
+				selection_id,
+			)
 			return f"{loaded_file.selection_name}:{selection_id}"
 
 		except Exception as e:
-			print(f"[ERROR] Could not load selection {selection_id}: {e}")
-			traceback.print_exc()
+			logger.exception(
+				"Could not load selection %s",
+				selection_id
+			)
 			return no_update

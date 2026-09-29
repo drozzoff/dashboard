@@ -17,10 +17,9 @@ from dashboard.layout import make_layout
 
 logger = logging.getLogger(__name__)
 
-def _configure_default_logging(level=logging.INFO):
+def _configure_default_logging(level = logging.INFO):
 	package_logger = logging.getLogger("dashboard")
 
-	# Respect configuration supplied by the user.
 	if package_logger.handlers:
 		return
 
@@ -35,7 +34,6 @@ def _configure_default_logging(level=logging.INFO):
 	package_logger.addHandler(handler)
 	package_logger.setLevel(level)
 	package_logger.propagate = False
-
 
 def flatten_input(method):
 	@wraps(method)
@@ -125,7 +123,6 @@ class Dashboard:
 		self.assets_dir = Path(__file__).resolve().parent / "assets"
 		
 		if data_to_monitor is None:
-			logger.error("No data to monitor provided")
 			raise ValueError("No data to monitor provided")
 		
 		self.data_host, self.data_port = data_host, data_port
@@ -138,13 +135,13 @@ class Dashboard:
 
 		self._set_dependencies()
 
-	def _set_dependencies(self, debug = False):
+	def _set_dependencies(self):
 
 		self.data_fields = self.profile.make_datafields(self)
 		self.info_fields = self.profile.make_infofields(self)
 
 		self.callbacks, buffer_keys = [], []
-		logger.info(f"Requested the data {self.data_to_monitor}")
+		logger.info("Requested the data %s", self.data_to_monitor)
 
 		self.info_dict = {}
 
@@ -195,9 +192,9 @@ class Dashboard:
 		buffers_to_create = buffer_keys.copy()
 
 		buffer_keys_masked = list(filter(lambda key: key in fields_keys, buffer_keys))
-		if debug: 
-			logger.info(f"Pass 0: {buffer_keys}")
-			logger.info(f"not unique values = {buffer_keys_masked}")
+
+		logger.debug("Pass 0: %s", buffer_keys)
+		logger.debug("Not unique values = %s", buffer_keys_masked)
 
 		pass_index = 1
 		while buffer_keys_masked:
@@ -208,21 +205,23 @@ class Dashboard:
 
 			buffer_keys = list(set(buffer_keys))
 
-			if debug: logger.info(f"Pass {pass_index}: {buffer_keys}")
+			logger.debug("Pass %s: %s", pass_index, buffer_keys)
 			
 			pass_index += 1
 			buffer_keys_masked = list(filter(lambda key: key in fields_keys, buffer_keys))
-			if debug: logger.info(f"not unique values = {buffer_keys_masked}")
+			logger.debug("Not unique values = %s", buffer_keys_masked)
 
-			if pass_index == 10:
-				logger.error(f"Could not resolve dependencies. pass_index == 10")
-				raise Exception()
+			if pass_index >= 10:
+				raise RuntimeError(
+					f"Could not resolve dependencies after {pass_index} passes. "
+					f"Unresolved dependencies: {buffer_keys_masked}"
+				)
 		
 		self.data_to_expect = buffer_keys
 		buffers_to_create = list(set(buffers_to_create))
 
-		logger.info(f"Expected data: {self.data_to_expect}")
-		logger.info(f"Buffers to create: {buffers_to_create}")
+		logger.info("Expected data: %s", self.data_to_expect)
+		logger.info("Buffers to create: %s", buffers_to_create)
 		
 		self.data_buffer = {key: DataBuffer() for key in buffers_to_create}
 
@@ -247,7 +246,7 @@ class Dashboard:
 		for i in range(self.MAX_CALLBACK_LEVEL):
 			for callback in self.callbacks:
 				if callback['level'] == i:
-					if debug: logger.info(f"Running callback '{callback['name']}'")
+					logger.debug("Running callback '%s'", callback['name'])
 					callback['callback']()
 
 	def start_listener(self):
@@ -266,12 +265,16 @@ class Dashboard:
 		srv.listen(1)
 
 		assigned_port = srv.getsockname()[1]
-		logger.info(f"Listening for data at {self.data_host}:{self.data_port}")
+		logger.info(
+			"Listening for data at %s:%s",
+			self.data_host,
+			self.data_port
+		)
 		
 		def run():
 			while not getattr(self, "_stop_listener", False):
 				conn, addr = srv.accept()
-				logger.info(f"Connection from {addr}")
+				logger.info("Connection from %s", addr)
 				self._clear_buffer()
 				self.current_batch_id = 0
 
@@ -297,7 +300,7 @@ class Dashboard:
 						self.current_batch_id += 1
 
 				except json.JSONDecodeError as e:
-					logger.error(f"Invalid JSON: {e}")
+					logger.warning("Skipping invalid JSON data: %s", e)
 				finally:
 					conn.close()
 					logger.info("Client disconnected, back to listening")
@@ -341,8 +344,22 @@ class Dashboard:
 				continue
 
 			if len(x) != len(y):
-				logger.error(f"length mismatch for {key!r}, trace {i}: x = {len(x)}, y = {len(y)}")
-				return
+				logger.error(
+					"length mismatch for %r, trace %s: x = %s, y = %s",
+					key,
+					i,
+					len(x),
+					len(y)
+				)
+				fig.add_annotation(
+					text = "Data could not be plotted because the buffer lengths differ.",
+					x = 0.5,
+					y = 0.5,
+					xref = "paper",
+					yref = "paper",
+					showarrow = False,
+				)
+				continue
 
 			fig.add_trace(go.Scatter(
 				x = x,
@@ -364,7 +381,11 @@ class Dashboard:
 		Start a dash server
 		"""
 		self.assets_dir = Path(__file__).resolve().parent / "assets"
-		self.app = dash.Dash(__name__, title = "Extraction dashboard", assets_folder = str(self.assets_dir))
+		self.app = dash.Dash(
+			__name__, 
+			title = "Extraction dashboard", 
+			assets_folder = str(self.assets_dir)
+		)
 
 		Compress(self.app.server)
 
@@ -373,7 +394,7 @@ class Dashboard:
 		register_callbacks(self.app, self)
 
 		try:
-			logger.info(f"Starting Dash server at http://{host}:{port}")
+			logger.info("Starting Dash server at http://%s:%s", host, port)
 			self.app.run(
 				host = host,
 				port = port,
