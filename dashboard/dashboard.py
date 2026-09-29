@@ -115,6 +115,27 @@ class Dashboard:
 		data_port: int = 35236,
 		log_level: int | str | None = logging.INFO
 		):
+		"""
+		Initialize the dashboard and resolve its data dependencies.
+
+		Parameters
+		----------
+		profile
+			Profile object defining the available data fields, information fields,
+			callbacks, buffer dependencies, and plotting configuration.
+		data_to_monitor
+			Name or names of the data fields to display. Every requested name must
+			be provided by the selected profile.
+		data_host
+			Network interface on which the live-data listener accepts connections.
+			The default is ``"127.0.0.1"``.
+		data_port
+			Port used by the live-data listener. The default is ``35236``.
+		log_level
+			Logging level for the ``dashboard`` logger hierarchy. Examples include
+			``logging.DEBUG``, ``logging.INFO``, and ``"WARNING"``. If ``None``,
+			the dashboard does not install its default logging configuration.
+		"""
 
 		if log_level is not None:
 			_configure_default_logging(log_level)
@@ -148,7 +169,10 @@ class Dashboard:
 		fields = self.data_fields | self.info_fields
 		for data_key in self.data_to_monitor:
 			if data_key not in fields:
-				raise ValueError(f"Unsupported data requested: {data_key}. Supported data: {fields.keys()}")
+				raise ValueError(
+					f"Unsupported data requested: {data_key!r}." 
+					f"Supported data: {list(fields)}"
+				)
 
 			# Creating primary and secondary data buffers
 			for key in fields[data_key].buffer_dependance:
@@ -293,7 +317,10 @@ class Dashboard:
 							with self._buflock:
 								for key in self.data_to_expect:
 									if key in incoming:
-										self.data_buffer[key].extend(incoming[key], batch_id = self.current_batch_id)
+										self.data_buffer[key].extend(
+											incoming[key], 
+											batch_id = self.current_batch_id
+										)
 								
 								self.run_callbacks()
 						
@@ -352,7 +379,7 @@ class Dashboard:
 					len(y)
 				)
 				fig.add_annotation(
-					text = "Data could not be plotted because the buffer lengths differ.",
+					text = "Data could not be plotted",
 					x = 0.5,
 					y = 0.5,
 					xref = "paper",
